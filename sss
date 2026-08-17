@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+#set -x
+
+RED=$'\033[31m'
+GREEN=$'\033[32m'
+BLUE=$'\033[34m'
+YELLOW=$'\033[33m'
+RESET=$'\033[0m'
+
+USER_COL=80
+
+docker_binding=$(docker container ls --format "{{.Names}} {{.Ports}}" -a 2>/dev/null | grep -iF -- '->' | sed 's/:::/[::]:/g')
+
+visible_len() {
+    # Get max lenght without ASCCI Color
+    sed -E $'s/\x1B\\[[0-9;]*[A-Za-z]//g' <<< "$1" | awk '{print length}'
+}
+
+color_ip_without_port() {
+    local addr="$1"
+
+    # IPv6
+    if [[ "$addr" =~ ^(\[[^]]+\])(:.*)$ ]]; then
+        printf '%s' "${YELLOW}${BASH_REMATCH[1]}${RESET}${BASH_REMATCH[2]}"
+        return
+    fi
+
+    # IPv4 ans wildcart
+    if [[ "$addr" =~ ^(.+)(:[^:]*)$ ]]; then
+        printf '%s' "${YELLOW}${BASH_REMATCH[1]}${RESET}${BASH_REMATCH[2]}"
+        return
+    fi
+
+    # Other
+    printf '%s' "${YELLOW}${addr}${RESET}"
+}
+
+lines=()
+users=()
+pids=()
+max_len=0
+
+# Try as root
+if [[ $( id -u ) -ne 0 ]] ; then
+    if command -v sudo >/dev/null 2>&1; then
+        sudo "$( readlink -f "$BASH_SOURCE" )" $args && exit
+    else
+        printf '%s\n' "${YELLOW}WARNING: Running unprivileged${RESET}"
+    fi
+fi
+
+ss_output=$(ss "$@" 2>/dev/null)
+header=$(head -n 1 <<< "$ss_output")
+
+while IFS= read -r line
+do
+    proto=$(awk '{print $1}' <<< "$line")
+    state=$(awk '{print $2}' <<< "$line")
+    local_addr=$(awk '{print $5}' <<< "$line")
+
+    proc="-"
+    pid="-"
+    user="-"
+
+    # Extract Process and PID from last ss colone
+    if [[ $line =~ users:\(\(\"([^\"]+)\".*pid=([0-9]+) ]]; then
+        proc="${BASH_REMATCH[1]}"
+        pid="${BASH_REMATCH[2]}"
+
+        # Get running User
+        user=$(ps -o user= -p "$pid" 2>/dev/null | awk '{print $1}')
+        [[ -z "$user" ]] && user="-"
+
+        if [[ "$proc" == "dockerd" || "$proc" == "docker-proxy" ]]; then
+            # Get docker container name
+            container=$(grep -F "$local_addr" <<< "$docker_binding" | awk '{print $1}' | head -1)
+            [[ -n "$container" ]] && proc="$proc:$container"
+        fi
+
+        # Inplace replace of the users colone
+        line=$(sed -E "s|users:\(\(.*\)\)|$proc|" <<< "$line")
+    fi
+
+    # Add color proto
+    case "$proto" in
+        tcp|tcp4|tcp6)
+            proto_color="$GREEN"
+            ;;
+        udp|udp4|udp6)
+            proto_color="$BLUE"
+            ;;
+        *)
+            proto_color="$RESET"
+            ;;
+    esac
+    line="${line/#$proto/${proto_color}${proto}${RESET}}"
+
+    # Add color state
+    case "$state" in
+        LISTEN)
+            line="${line/$state/${RED}${state}${RESET}}"
+            ;;
+        ESTAB)
+            line="${line/$state/${GREEN}${state}${RESET}}"
+            ;;
+        UNCONN)
+            line="${line/$state/${BLUE}${state}${RESET}}"
+            ;;
+    esac
+
+    # Add color IP
+    if [[ -n "$local_addr" ]]; then
+        colored_local_addr=$(color_ip_without_port "$local_addr")
+        line="${line/$local_addr/$colored_local_addr}"
+    fi
+
+    # Save current line
+    lines+=("$line")
+    users+=("$user")
+    pids+=("$pid")
+
+    # Get max lenght
+    len=$(visible_len "$line")
+    (( len > max_len )) && max_len=$len
+
+done < <(tail -n +2 <<< "$ss_output")
+
+USER_COL=$((max_len + 2))
+
+# Ensure USER_COL is wide enough for the ss header
+header_len=$(visible_len "$header")
+(( header_len + 2 > USER_COL )) && USER_COL=$((header_len + 2))
+# Print ss header + added columns
+printf '%-*s%-12s %s\n' "$USER_COL" "$header" "PID" "User"
+
+# Review all lignes to print them
+for i in "${!lines[@]}"
+do
+    line="${lines[$i]}"
+    user="${users[$i]}"
+    pid="${pids[$i]}"
+
+    len=$(visible_len "$line")
+    pad=$((USER_COL - len))
+
+    (( pad < 2 )) && pad=2
+
+    printf '%s%*s%-12s %s\n' "$line" "$pad" "" "$pid" "$user"
+done
