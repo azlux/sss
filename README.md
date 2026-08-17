@@ -4,6 +4,7 @@ Colorful IP sockets list (ss command) with docker support
 
 Additionnal feacture:
 - auto-sudo
+- add docker container name if concerned
 - add process PID
 - add process User
 
