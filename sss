@@ -10,6 +10,7 @@ RESET=$'\033[0m'
 USER_COL=80
 
 docker_binding=$(docker container ls --format "{{.Names}} {{.Ports}}" -a 2>/dev/null | grep -iF -- '->' | sed 's/:::/[::]:/g')
+args="$@"
 
 visible_len() {
     # Get max lenght without ASCCI Color
@@ -49,7 +50,7 @@ if [[ $( id -u ) -ne 0 ]] ; then
     fi
 fi
 
-ss_output=$(ss "$@" 2>/dev/null)
+ss_output=$(ss $args 2>/dev/null)
 header=$(head -n 1 <<< "$ss_output")
 
 while IFS= read -r line
