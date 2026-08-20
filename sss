@@ -10,7 +10,7 @@ RESET=$'\033[0m'
 USER_COL=80
 
 docker_binding=$(docker container ls --format "{{.Names}} {{.Ports}}" -a 2>/dev/null | grep -iF -- '->' | sed 's/:::/[::]:/g')
-args="$@"
+args=("$@")
 
 visible_len() {
     # Get max lenght without ASCCI Color
@@ -36,6 +36,13 @@ color_ip_without_port() {
     printf '%s' "${YELLOW}${addr}${RESET}"
 }
 
+trim() {
+    local s=$1 LC_CTYPE=C
+    s=${s#"${s%%[![:space:]]*}"}
+    s=${s%"${s##*[![:space:]]}"}
+    printf '%s' "$s"
+}
+
 lines=()
 users=()
 pids=()
@@ -44,14 +51,17 @@ max_len=0
 # Try as root
 if [[ $( id -u ) -ne 0 ]] ; then
     if command -v sudo >/dev/null 2>&1; then
-        sudo "$( readlink -f "$BASH_SOURCE" )" $args && exit
+        sudo "$( readlink -f "$BASH_SOURCE" )" "${args[@]}" && exit
     else
         printf '%s\n' "${YELLOW}WARNING: Running unprivileged${RESET}"
     fi
 fi
 
-ss_output=$(ss $args 2>/dev/null)
+ss_output=$(ss "${args[@]}" 2>/dev/null)
 header=$(head -n 1 <<< "$ss_output")
+
+# Trim + add space in headers if compressed to much
+header=$(trim "$header" | sed '1s/PortProcess/Port Process/')
 
 while IFS= read -r line
 do
@@ -62,7 +72,7 @@ do
     proc="-"
     pid="-"
     user="-"
-
+    
     # Extract Process and PID from last ss colone
     if [[ $line =~ users:\(\(\"([^\"]+)\".*pid=([0-9]+) ]]; then
         proc="${BASH_REMATCH[1]}"
