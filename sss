@@ -72,7 +72,7 @@ do
     proc="-"
     pid="-"
     user="-"
-    
+    line=$(trim "$line") 
     # Extract Process and PID from last ss colone
     if [[ $line =~ users:\(\(\"([^\"]+)\".*pid=([0-9]+) ]]; then
         proc="${BASH_REMATCH[1]}"
@@ -122,7 +122,7 @@ do
     # Add color IP
     if [[ -n "$local_addr" ]]; then
         colored_local_addr=$(color_ip_without_port "$local_addr")
-        line="${line/$local_addr/$colored_local_addr}"
+        line="${line/"$local_addr"/"$colored_local_addr"}"
     fi
 
     # Save current line
